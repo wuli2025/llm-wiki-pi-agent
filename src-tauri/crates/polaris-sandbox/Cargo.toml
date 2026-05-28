@@ -1,0 +1,14 @@
+[package]
+name = "polaris-sandbox"
+version = "0.1.0"
+edition = "2021"
+description = "Polaris 板块⑤ 安全沙箱层 (轻量 Docker 镜像 + docker CLI 包装)"
+authors = ["winner3388"]
+
+[dependencies]
+polaris-core = { path = "../polaris-core" }
+tauri = { version = "2.1", features = [] }
+anyhow = "1"
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,9 @@
+[package]
+name = "polaris-core"
+version = "0.1.0"
+edition = "2021"
+description = "Polaris 板块契约层：跨板块共享 DTO / 能力 trait / 事件契约"
+authors = ["winner3388"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

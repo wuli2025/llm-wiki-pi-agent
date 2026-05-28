@@ -1,0 +1,65 @@
+# ═══════════════════════════════════════════════════════════════
+# Cargo workspace —— 板块化架构 (架构重构 Phase 0)
+# 根包 polaris-app = host (宿主, 仅装配)；各板块为 crates/ 下独立 crate。
+# 跨板块只依赖 polaris-core 契约，可 `cargo test -p <板块>` 独立测试。
+# ═══════════════════════════════════════════════════════════════
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[package]
+name = "polaris-app"
+version = "0.1.0"
+description = "Polaris Lite - 本地优先 AI 工作台 (pi 内核轻量版)"
+authors = ["winner3388"]
+edition = "2021"
+
+[lib]
+name = "polaris_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.1", features = [] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-shell = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+walkdir = "2"
+once_cell = "1"
+directories = "5"
+parking_lot = "0.12"
+regex = "1"
+
+# 板块 crate (架构重构 Phase 0–1)
+polaris-core = { path = "crates/polaris-core" }
+polaris-sandbox = { path = "crates/polaris-sandbox" }
+# 文件转换 (板块② 上传/入库) — 纯 Rust，无需 pdfium.dll 等原生绑定
+# clean-room 自写转换逻辑，仅这些底层解析库为第三方
+zip = "8.6.0"          # docx/pptx/xlsx 本质是 zip+xml，解压取 XML
+calamine = "0.35.0"    # xlsx/xls/ods 表格 → markdown
+pdf-extract = "0.10.0" # pdf 文本抽取（纯 Rust，panic 由 convert::guard 兜住）
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# ═══════════════════════════════════════════════════════════════
+# Release 体积优化 — 工业级减负配置
+# ═══════════════════════════════════════════════════════════════
+[profile.release]
+opt-level = 3          # 最高优化级别
+lto = true             # 链接时优化，合并所有 crate
+codegen-units = 1      # 单 codegen unit，最大化优化
+# 用 unwind（非 abort）：第三方解析库（pdf-extract/calamine…）遇坏文件可能 panic，
+# convert::guard 用 catch_unwind 在命令边界兜成 Err，避免单个坏文件崩掉整个 app。
+panic = "unwind"
+strip = true           # 自动剥离符号表
+
+# 进一步缩减：移除断言和溢出检查（仅 release）
+[profile.release.package."*"]
+opt-level = 3

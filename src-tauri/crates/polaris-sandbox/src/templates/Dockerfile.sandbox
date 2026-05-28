@@ -1,0 +1,30 @@
+# Polaris Lite 安全沙箱镜像 — pi 内核版 (node + pi)
+#
+# 轻量版内核为 pi (`@earendil-works/pi-coding-agent`), 它是 npm 包, 需 Node ≥ 22.19。
+# 故沙箱基于 node:22-alpine, 全局装 pi。相比 Claude Code 原生二进制(~100MB)版本,
+# 这里以 Node 运行时换取「与宿主机同一内核」的一致性。
+#
+# 安全策略 (容器运行时由 docker run 注入):
+#   --memory=4g --cpus=2
+#   --security-opt=no-new-privileges
+#   -v ~/Polaris:/workspace        (读写)
+#   -v ~/Polaris/PolarisKB:/kb:ro  (只读)
+
+FROM node:22-alpine
+
+# 运行依赖: ca-certificates + ripgrep (pi 的 grep/find 工具优先用系统 ripgrep)
+RUN apk add --no-cache ca-certificates ripgrep git \
+    && update-ca-certificates
+
+# 全局安装 pi 内核 (轻量, 纯 JS)
+RUN npm install -g @earendil-works/pi-coding-agent \
+    && npm cache clean --force
+
+# 非 root 用户 (busybox adduser 会自动建同名组)
+RUN adduser -D -u 1000 polaris
+
+WORKDIR /workspace
+USER polaris
+
+# 默认指令由 docker run 覆盖 (sleep infinity)
+CMD ["sh"]

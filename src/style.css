@@ -1,0 +1,106 @@
+/* ===== Polaris Lite 墨蓝水墨主题 (轻量版: 品牌主色由纯黑改为墨蓝, 与原版做区分) ===== */
+:root {
+  --bg: #fafaf7;
+  --bg-soft: #f5f4ef;
+  --panel: #ffffff;
+  --panel-hover: #fbfaf6;
+
+  --border: #e2e0d8;
+  --border-soft: #ecebe5;
+  --border-strong: #d0cec5;
+
+  --text: #1a1a1c;
+  --text-2: #44444a;
+  --muted: #8a8a92;
+  --dim: #b5b5bc;
+
+  /* 轻量版品牌主色: 墨蓝 (原版为近纯黑 #1a1a1c)。logo / 标题 / 主按钮都吃这个变量,
+     一处改色即让整个 App 的品牌识别从「纯黑」转为「墨蓝」, 与原版直观区分。 */
+  --ink: #14304d;
+  --ink-2: #284a6e;
+
+  --selection-bg: #ebebe8;
+  --selection-bg-hover: #e2e2df;
+
+  --primary: #2c4661;
+  --primary-soft: #e8edf3;
+  --primary-deep: #1d3045;
+
+  --vermilion: #c0392b;
+  --vermilion-soft: #fdeeec;
+
+  --gold: #a78c4f;
+
+  --code-bg: #f4f3ee;
+  --code-text: #3a3a40;
+
+  --shadow-sm: 0 1px 1px rgba(20, 20, 25, 0.018);
+  --shadow: 0 1px 6px rgba(20, 20, 25, 0.025);
+  --shadow-lg: 0 4px 22px rgba(20, 20, 25, 0.06);
+
+  --hairline: rgba(20, 20, 25, 0.06);
+
+  --serif: "Source Han Serif SC", "Noto Serif SC", STSong, "SimSun", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    "Segoe UI", Inter, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.78;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* 全局滚动条 (细) */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

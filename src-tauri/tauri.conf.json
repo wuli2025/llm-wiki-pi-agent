@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Polaris Lite",
+  "version": "0.1.0",
+  "identifier": "com.polaris.lite",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "北极星 Lite · Polaris (pi 内核)",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "decorations": true,
+        "resizable": true,
+        "fullscreen": false,
+        "theme": "Light"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": [
+      "resources/seed-kb/**/*"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "本地优先 AI 工作台 (轻量版)",
+    "longDescription": "Polaris Lite 是一个本地优先的 AI 工作台轻量版,内核采用更轻量的 pi coding-agent,集成多供应商对话、目标模式、维基知识库和 Docker 安全沙箱。",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "both",
+        "compression": "lzma",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

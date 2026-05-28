@@ -1,0 +1,25 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+src-tauri/target
+src-tauri/gen
+src-tauri/Cargo.lock
+
+# Runtime outputs / local logs
+.dev.log
+output/
+PolarisKB/output/
+# 对话产物（运行时生成，落在工作文件夹/KB 根下的 conversations/，不该进仓库）
+PolarisKB/conversations/
+conversations/
+
+# Claude workspace / temp files
+.claude/
+*.html
+!index.html
+!src-tauri/**/*.html
