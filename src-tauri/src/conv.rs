@@ -251,6 +251,50 @@ pub fn conv_create_project(name: String) -> Result<Project, String> {
     Ok(p)
 }
 
+/// 该项目在磁盘上的工作目录 `~/Polaris/projects/<id>/`(须与 write_mao_persona / claude_md 一致)。
+fn project_dir(project_id: &str) -> Option<PathBuf> {
+    let user = UserDirs::new()?;
+    Some(
+        user.home_dir()
+            .join("Polaris")
+            .join("projects")
+            .join(project_id),
+    )
+}
+
+/// 在系统文件管理器中打开该项目的工作目录(不存在则先建好, 否则 explorer 会报路径不存在)。
+#[tauri::command]
+pub fn conv_open_project_dir(project_id: String) -> Result<(), String> {
+    let dir = project_dir(&project_id).ok_or_else(|| "no user dir".to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.to_string_lossy().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // 路径可能含空格, 用 raw_arg 引号包裹; 正斜杠转反斜杠
+        let win_path = path.replace('/', "\\");
+        std::process::Command::new("explorer")
+            .raw_arg(format!("\"{}\"", win_path))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn conv_archive_project(project_id: String) -> Result<(), String> {
     let mut st = STATE.write();

@@ -25,9 +25,12 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
+
+// 构建期注入的「粉丝福利」MiniMax key(XOR 滚动混淆字节, 见 build.rs)。
+include!(concat!(env!("OUT_DIR"), "/gift_key.rs"));
 
 const DEFAULT_TOKEN_FIELD: &str = "ANTHROPIC_AUTH_TOKEN";
 const API_KEY_FIELD: &str = "ANTHROPIC_API_KEY";
@@ -169,6 +172,57 @@ struct Store {
 static STORE: Lazy<RwLock<Store>> = Lazy::new(|| RwLock::new(Store::default()));
 static STORE_PATH: Lazy<RwLock<PathBuf>> = Lazy::new(|| RwLock::new(PathBuf::new()));
 
+/// 还原构建期注入的「粉丝福利」MiniMax key。
+/// 二进制内为 XOR 混淆字节, 此处解出明文; 未注入(本地 dev 构建)时返回空串。
+/// 提醒: 客户端解密逻辑随包一起分发, 混淆只是延缓提取, 不构成真正保护。
+fn gift_minimax_key() -> String {
+    if GIFT_MINIMAX_OBF.is_empty() || GIFT_MINIMAX_PAD.is_empty() {
+        return String::new();
+    }
+    let bytes: Vec<u8> = GIFT_MINIMAX_OBF
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ GIFT_MINIMAX_PAD[i % GIFT_MINIMAX_PAD.len()])
+        .collect();
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
+/// 首启一次性把「粉丝福利」MiniMax 供应商(含构建期注入的 key)种进 store。
+/// 用 marker(`<data>/.gift_minimax_seeded`)记录, 之后即便用户在坞里删除/改空,
+/// 重启也 **不会** 再种 —— 尊重用户的删除(沿用资料库播种的语义)。
+/// 未注入 key(dev 构建)时直接跳过。返回是否新种了内容。
+fn seed_gift_minimax(store: &mut Store, data_dir: &Path) -> bool {
+    let key = gift_minimax_key();
+    if key.is_empty() {
+        return false;
+    }
+    let marker = data_dir.join(".gift_minimax_seeded");
+    if marker.exists() {
+        return false;
+    }
+    // 不管后面有没有真种进去, 都打 marker, 避免每次启动重试 + 尊重删除。
+    let _ = fs::write(&marker, b"seeded\n");
+
+    // 用户已自配同 id 供应商则不覆盖。
+    if store.items.iter().any(|i| i.id == "minimax") {
+        return false;
+    }
+    store.items.push(StoredProvider {
+        id: "minimax".to_string(),
+        name: "MiniMax".to_string(),
+        note: "粉丝福利 · 预置额度，开箱即用".to_string(),
+        website_url: "https://www.minimaxi.com".to_string(),
+        token_field: DEFAULT_TOKEN_FIELD.to_string(),
+        model: "MiniMax-M2".to_string(),
+        settings_config: default_config(
+            "https://api.minimaxi.com/anthropic",
+            DEFAULT_TOKEN_FIELD,
+            &key,
+        ),
+    });
+    true
+}
+
 pub fn init(_app: &AppHandle) -> Result<()> {
     let user = UserDirs::new().ok_or_else(|| anyhow::anyhow!("no user dir"))?;
     let dir = user.home_dir().join("Polaris").join("data");
@@ -176,14 +230,20 @@ pub fn init(_app: &AppHandle) -> Result<()> {
     let path = dir.join("providers.json");
     *STORE_PATH.write() = path.clone();
 
-    let store: Store = if path.exists() {
+    let mut store: Store = if path.exists() {
         let txt = fs::read_to_string(&path).unwrap_or_default();
         serde_json::from_str(&txt).unwrap_or_default()
     } else {
         Store::default()
     };
 
+    // 首启一次性种「粉丝福利」MiniMax(含构建期注入的 key; 未注入则空, 直接跳过)。
+    let gifted = seed_gift_minimax(&mut store, &dir);
+
     *STORE.write() = store;
+    if gifted {
+        persist();
+    }
     // 启动时把已配置供应商同步进 pi 的 models.json, 保证 pi 侧配置始终最新。
     let snapshot = STORE.read().clone();
     let _ = rebuild_pi_models_json(&snapshot);
@@ -522,6 +582,40 @@ pub fn current_model_ref() -> Option<String> {
             }
         }
     }
+}
+
+/// 轻量版不读 `~/.claude/settings.json` 的 live env（pi 用 `~/.pi/agent` 自己的配置）。
+/// 这里返回空表，使生图能力检测仅回退到**进程环境变量** `OPENAI_API_KEY`（见下方 `||` 分支）。
+fn read_live_env() -> Map<String, Value> {
+    Map::new()
+}
+
+/// 给「生图」用的当前供应商画像：返回 (当前供应商展示名, 是否疑似具备真实生图能力)。
+///
+/// 真相：供应商坞里 55 家全部是 Anthropic 协议的文本 / 代码大模型，**没有一个能生图**；
+/// 真要生图得另配一份独立的图像 API（如 OpenAI gpt-image）。所以默认「不支持」，
+/// 仅当 settings.json 的 env 或进程环境里检测到 `OPENAI_API_KEY` 时才认为可尝试真实生图。
+pub fn image_gen_capability() -> (String, bool) {
+    let store = STORE.read().clone();
+    let views = build_views(&store);
+    let cur = detect_current(&views, &store);
+    let name = views
+        .iter()
+        .find(|v| v.id == cur)
+        .map(|v| v.name.clone())
+        .unwrap_or_else(|| "Claude 官方".to_string());
+
+    let live = read_live_env();
+    let has_image_key = live
+        .get("OPENAI_API_KEY")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+        || std::env::var("OPENAI_API_KEY")
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+    (name, has_image_key)
 }
 
 // ───────────────────────── Commands: 供应商 ─────────────────────────

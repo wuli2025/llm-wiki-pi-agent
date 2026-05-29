@@ -13,8 +13,11 @@
 //!   当前进程 PATH (`std::env::set_var`), 让本次会话不重启即可 spawn pi。
 //! - **更新**: 装好后可一键检测/更新 pi 到最新版 (`npm view` / `npm i -g ...@latest`)。
 //!
-//! 跨平台: 本模块以 Windows 为主场。非 Windows 下探测仍可用 (走 which/直接执行),
-//! 安装与 PATH 写入是 Windows 专属逻辑, 其余平台返回友好提示, 不阻断编译。
+//! 跨平台: 探测两端通用 (Windows 走 where.exe / cmd, 类 Unix 走 which / 直接执行)。
+//! 安装 Claude Code 已两端可用 —— npm 方式命令一致, native 各走官方脚本 (Windows 的
+//! install.ps1 / macOS·Linux 的 install.sh), 经 `build_install_shell` 选 PowerShell 或 sh。
+//! 仅「持久化 PATH 进注册表」与「装 Node/PowerShell7」是 Windows 专属逻辑 (mac 自带 shell,
+//! 全局 npm bin 通常已在 PATH); 其余平台对这两项返回友好提示, 不阻断编译。
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -76,7 +79,10 @@ pub struct EnvReport {
     pub pi_dir: Option<String>,
     /// 该目录是否已在「用户 PATH」里 (Windows)。false ⇒ 需要修复
     pub pi_dir_on_user_path: bool,
-    /// 整体是否就绪 (pi 可用即视为可以进入)
+    /// 是否有 pi 可用的 shell —— Windows: 真身 PowerShell 7 (非 Store 别名) 或 Git Bash;
+    /// mac/Linux 自带 sh/zsh 恒为 true。false ⇒ 即便装了 pi, 对话里也会报「找不到 shell」。
+    pub shell_ready: bool,
+    /// 整体是否就绪 (pi 已装 **且** 有可用 shell 才算真能跑起来)
     pub ready: bool,
 }
 
@@ -263,6 +269,51 @@ fn pwsh_candidates() -> Vec<PathBuf> {
     ]
 }
 
+/// Windows「应用执行别名」空壳: `%LOCALAPPDATA%\Microsoft\WindowsApps\` 下的 0 字节重解析点
+/// (从 Microsoft Store 装 PowerShell 7 / Python 等会留下)。交互式终端里它能转发到 Store 真身,
+/// 但**本应用是 GUI 进程、以 CREATE_NO_WINDOW 无控制台方式 spawn claude**, claude 再去拉这个
+/// 别名时在该上下文下起不来 → 报「找不到 PowerShell」。故探测时把它当「没装」, 引导装
+/// Program Files 里的真身 (普通 exe, 任何子进程都能稳定 spawn) 替代。
+fn is_app_exec_alias(p: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let in_windows_apps = p
+            .components()
+            .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case("WindowsApps"));
+        if !in_windows_apps {
+            return false;
+        }
+        // 0 字节 = 典型的执行别名占位 (reparse point), 不是真二进制
+        std::fs::metadata(p).map(|m| m.len() == 0).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = p;
+        false
+    }
+}
+
+/// 探测可用的 Git Bash (claude 在 Windows 上可接受的另一种 shell)。
+/// 先认 `CLAUDE_CODE_GIT_BASH_PATH` 覆盖, 再扫常见安装位置。
+/// 仅 Windows 需要 (扫的全是 Windows 路径); 类 Unix 用系统自带 shell, 不走这里。
+#[cfg(windows)]
+fn git_bash_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CLAUDE_CODE_GIT_BASH_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
+}
+
 /// 通用工具探测: which 命中 + 已知候选, 取首个可用; on_path = 是否被 PATH 发现。
 fn detect(
     key: &str,
@@ -273,7 +324,11 @@ fn detect(
     required: bool,
     install_hint: &str,
 ) -> ToolStatus {
-    let on_path_hits = which_all(bin);
+    // 滤掉 WindowsApps 的执行别名空壳 —— 它对无控制台 spawn 的 claude 不可用, 不能算「已装」
+    let on_path_hits: Vec<PathBuf> = which_all(bin)
+        .into_iter()
+        .filter(|p| !is_app_exec_alias(p))
+        .collect();
     let on_path = !on_path_hits.is_empty();
 
     // 解析出一个具体路径: PATH 命中优先 (Windows 偏好 .exe), 否则用存在的候选
@@ -466,6 +521,15 @@ fn pi_dir_for_fix(pi: &ToolStatus) -> Option<PathBuf> {
     npm_global_prefix().or_else(|| home_dir().map(|h| h.join("AppData").join("Roaming").join("npm")))
 }
 
+/// 装完 PowerShell 7 后, 把它的目录 (`C:\Program Files\PowerShell\7`) 塞进 PATH (进程 + 用户),
+/// 让**本进程**后续 spawn 的 claude 立刻找到真身, 而不是 WindowsApps 里起不来的 Store 别名 —— 装完免重启即用。
+/// 真身不存在 (没装成功) 时返回 None。
+fn ensure_pwsh_on_path() -> Option<PathFixResult> {
+    let exe = pwsh_candidates().into_iter().find(|p| p.exists())?;
+    let dir = exe.parent()?.to_string_lossy().to_string();
+    Some(ensure_dir_on_path(&dir))
+}
+
 // ───────────────────────── Commands ─────────────────────────
 
 #[tauri::command]
@@ -517,7 +581,13 @@ pub fn env_check() -> EnvReport {
         _ => true,
     };
 
-    let ready = pi.found;
+    // 可用 shell: Windows 需真身 pwsh (detect 已滤掉 Store 别名) 或 Git Bash;
+    // 类 Unix(含 macOS) 自带 /bin/sh、zsh/bash, pi 直接可用 → 恒就绪。
+    #[cfg(windows)]
+    let shell_ready = pwsh.found || git_bash_path().is_some();
+    #[cfg(not(windows))]
+    let shell_ready = true;
+    let ready = pi.found && shell_ready;
 
     EnvReport {
         os,
@@ -527,6 +597,7 @@ pub fn env_check() -> EnvReport {
         npm,
         pi_dir: pi_dir.as_deref().map(to_fwd),
         pi_dir_on_user_path,
+        shell_ready,
         ready,
     }
 }
@@ -548,16 +619,13 @@ pub fn env_fix_path() -> Result<PathFixResult, String> {
 
 /// 安装 pi 内核 (`npm install -g @earendil-works/pi-coding-agent`)。
 /// method 兼容旧前端 ("native"/"npm" 均走 npm)。流式把安装日志通过 `env:stream`
-/// 事件推给前端; 成功后自动修 PATH。
+/// 事件推给前端; 成功后自动修 PATH。跨平台: Windows 经 PowerShell, macOS/Linux 经 `sh`。
 #[tauri::command]
 pub fn env_install_pi(app: AppHandle, method: Option<String>) -> Result<String, String> {
-    if !cfg!(windows) {
-        return Err("自动安装目前仅支持 Windows; 其他平台请用 `npm i -g @earendil-works/pi-coding-agent` 手动安装。".into());
-    }
     let _ = method; // pi 只有 npm 一条安装路径
     let inner = "npm install -g @earendil-works/pi-coding-agent".to_string();
     let req_id = next_req_id();
-    let cmd = build_powershell(&inner);
+    let cmd = build_install_shell(&inner);
     stream_install(app, req_id.clone(), cmd, true, "pi");
     Ok(req_id)
 }
@@ -800,12 +868,9 @@ pub fn env_pi_update_check() -> PiUpdateInfo {
 /// 复用流式安装管线; 成功后自动修 PATH (与首次安装一致)。
 #[tauri::command]
 pub fn env_update_pi(app: AppHandle) -> Result<String, String> {
-    if !cfg!(windows) {
-        return Err("自动更新目前仅支持 Windows; 其他平台请用 npm 手动更新。".into());
-    }
     let inner = "npm install -g @earendil-works/pi-coding-agent@latest";
     let req_id = next_req_id();
-    let cmd = build_powershell(inner);
+    let cmd = build_install_shell(inner);
     stream_install(app, req_id.clone(), cmd, true, "pi 更新");
     Ok(req_id)
 }
@@ -819,6 +884,46 @@ pub fn env_cancel(req_id: String) -> Result<(), String> {
 }
 
 // ───────────────────────── 内部: 流式安装 ─────────────────────────
+
+/// 构造一个跑给定内联命令的系统 shell 进程:
+/// - Windows → PowerShell (见 `build_powershell`);
+/// - 类 Unix(含 macOS) → `sh -lc`(`-l` 走登录配置以拿到用户 PATH, npm 全局 bin 才在内)。
+/// 安装/更新 Claude Code 这类跨平台命令统一走它。
+fn build_install_shell(inner: &str) -> Command {
+    #[cfg(windows)]
+    {
+        build_powershell(inner)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-lc", inner]);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd
+    }
+}
+
+/// Claude Code 的安装命令串 (按平台 + 方式选择)。
+/// - `npm` (默认): 跨平台一致, 经国内镜像装 (含原生二进制, 国内可装);
+/// - `native`: Windows 走官方 PowerShell 脚本, 类 Unix 走官方 `install.sh`。
+fn claude_install_cmd(method: &str) -> String {
+    match method {
+        "native" => {
+            #[cfg(windows)]
+            {
+                "irm https://claude.ai/install.ps1 | iex".to_string()
+            }
+            #[cfg(not(windows))]
+            {
+                "curl -fsSL https://claude.ai/install.sh | bash".to_string()
+            }
+        }
+        _ => "npm install -g @anthropic-ai/claude-code --registry=https://registry.npmmirror.com"
+            .to_string(),
+    }
+}
 
 /// 构造一个跑给定内联命令的 PowerShell 进程 (Bypass 执行策略, 以便 iex 远程脚本)。
 fn build_powershell(inner: &str) -> Command {
@@ -854,7 +959,7 @@ fn stream_install(app: AppHandle, req_id: String, mut cmd: Command, fix_path_aft
                     kind: "done".into(),
                     line: None,
                     ok: Some(false),
-                    message: Some(format!("启动安装进程失败: {e} (PowerShell 是否可用?)")),
+                    message: Some(format!("启动安装进程失败: {e} (系统 shell 是否可用?)")),
                 },
             );
             return;
@@ -936,6 +1041,19 @@ fn stream_install(app: AppHandle, req_id: String, mut cmd: Command, fix_path_aft
         } else {
             format!("{label} 安装未成功 (进程非零退出)，可查看上方日志或改用其他方式重试。")
         };
+
+        // 装完后若真身 pwsh 已就位 (本次刚装好或本就装了), 顺手把它的目录注入 PATH(进程+用户),
+        // 让本进程 spawn 的 pi 立刻用上 —— 装完 PowerShell 7 免重启即可对话 (仅 Windows 需要)。
+        #[cfg(windows)]
+        if success {
+            if let Some(fix) = ensure_pwsh_on_path() {
+                if fix.ok && fix.status == "added" {
+                    message.push('\n');
+                    message.push_str(&fix.message);
+                }
+            }
+        }
+
 
         // 成功后自动修 PATH (改环境变量) —— 这是「装完即可用」的关键
         if success && fix_path_after {

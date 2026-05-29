@@ -176,11 +176,12 @@ function stopCodexPoll() {
       :title="current ? `当前: ${current.name}` : 'API 供应商'"
       @click="open = !open"
     >
+      <!-- 状态点统一用蓝色（不再跟供应商色，避免出现刺眼的红点） -->
       <span
         class="dot"
         :style="{
-          background: current?.color || 'var(--primary)',
-          boxShadow: `0 0 0 3px ${(current?.color || '#2c4661')}1f`,
+          background: '#2f6fd0',
+          boxShadow: '0 0 0 3px #2f6fd029',
         }"
       />
       <template v-if="!props.collapsed">

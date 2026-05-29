@@ -10,10 +10,13 @@ export type ViewKey =
   | "chat"
   | "wiki"
   | "graph"
+  | "automation"
   | "sandbox"
   | "claude_md"
   | "skill_center"
   | "env_doctor"
+  | "mcp"
+  | "update"
   | "settings";
 
 export const useAppStore = defineStore("app", () => {
@@ -85,7 +88,11 @@ export const useAppStore = defineStore("app", () => {
   }
 
   const sidebarWidth = computed(() => (sidebarCollapsed.value ? 48 : 260));
-  const drawerWidth = computed(() => (drawerCollapsed.value ? 48 : 300));
+  // 收起后右抽屉完全消失（0 宽，不留小框/导轨）；需要时点对话顶栏的抽屉按钮或生成产物自动展开
+  const drawerWidth = computed(() => (drawerCollapsed.value ? 0 : 300));
+
+  // MCP 配置弹窗（全局状态，Sidebar 与 App 共用）
+  const showMcpModal = ref(false);
 
   async function refreshProjects() {
     projects.value = await convApi.listProjects();
@@ -122,6 +129,28 @@ export const useAppStore = defineStore("app", () => {
     currentProjectId.value = p.id;
     conversationsByProject.value = { ...conversationsByProject.value, [p.id]: [] };
     return p;
+  }
+
+  // 归档项目 = 从活动列表移除(后端只置 archived 标记, 对话/消息保留, 不做硬删除)
+  async function archiveProject(projectId: string) {
+    await convApi.archiveProject(projectId);
+    projects.value = projects.value.filter((p) => p.id !== projectId);
+    const next = { ...conversationsByProject.value };
+    delete next[projectId];
+    conversationsByProject.value = next;
+    if (expandedProjects.value.has(projectId)) {
+      expandedProjects.value.delete(projectId);
+      expandedProjects.value = new Set(expandedProjects.value);
+    }
+    // 当前项目被归档 → 回退到第一个剩余项目
+    if (currentProjectId.value === projectId) {
+      currentProjectId.value = projects.value[0]?.id ?? null;
+    }
+  }
+
+  // 在系统文件管理器中打开该项目的工作目录
+  async function openProjectDir(projectId: string) {
+    await convApi.openProjectDir(projectId);
   }
 
   async function createConversation(projectId: string) {
@@ -177,6 +206,7 @@ export const useAppStore = defineStore("app", () => {
     drawerCollapsed,
     sidebarWidth,
     drawerWidth,
+    showMcpModal,
     setView,
     toggleSidebar,
     toggleDrawer,
@@ -197,6 +227,8 @@ export const useAppStore = defineStore("app", () => {
     refreshConversations,
     toggleProject,
     createProject,
+    archiveProject,
+    openProjectDir,
     createConversation,
     deleteConversation,
     renameConversation,

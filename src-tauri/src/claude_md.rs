@@ -171,49 +171,37 @@ pub fn claude_md_write(
 // ───────────────────────── 给 chat::send 用 ─────────────────────────
 
 /// 主上下文渲染 (一次给 chat::send 全部内容):
-/// - 知识库块: KB CLAUDE.md (若激活) + 基于 user_prompt 的 kb_search 自动召回 top-3 全文
+/// - 知识库块: KB 行为指南 (若激活) + Karpathy 式结构化 wiki 上下文 (`kb::kb_context_block`,
+///   只要 KB 有内容就注入, 与 CLAUDE.md 是否填写**解耦**)
 /// - 项目块:  当前项目 CLAUDE.md (若激活)
 ///
-/// 设计: 把 KB 和它的 CLAUDE.md 当成「一体」, 不再让 LLM 自己去调 kb_search,
-/// 而是后端在发对话前就把召回结果嵌进去。
-pub fn render_for_project(project_id: Option<&str>, user_prompt: &str) -> String {
+/// 设计 (忠于 Karpathy llmwiki): 不做关键词召回硬塞, 也不让模型去调不存在的 kb_search;
+/// 而是注入结构化 wiki + 双链地图 + KB 根路径, 让模型用 Read/Glob/Grep 沿双链自取。
+/// (`_user_prompt` 不再用于关键词召回, 保留参数仅为不动调用方签名。)
+pub fn render_for_project(project_id: Option<&str>, _user_prompt: &str) -> String {
     let mut sections: Vec<String> = Vec::new();
 
-    // ① 知识库块
+    // ① 知识库块: 行为指南 (若激活) + 结构化 wiki 上下文 (只要 KB 有内容就注入)
+    let mut kb_block = String::new();
     if let Some(p) = kb_claude_md_path() {
         if let Ok(content) = fs::read_to_string(&p) {
             if !content.contains(PLACEHOLDER_MARKER) && !content.trim().is_empty() {
-                let mut block = format!(
-                    "### [知识库] `{}`\n\n{}\n\n",
+                kb_block.push_str(&format!(
+                    "### [知识库行为指南] `{}`\n\n{}\n\n",
                     p.display(),
                     content.trim()
-                );
-                // 同一个块里嵌入 kb_search 自动召回
-                let q = user_prompt.trim();
-                if !q.is_empty() {
-                    let hits = kb::kb_search(q.to_string(), Some(3));
-                    if !hits.is_empty() {
-                        block.push_str("#### 知识库自动召回 (top 3, 已在后端预查, 无需再调任何工具)\n\n");
-                        let kb_root = PathBuf::from(kb::kb_root());
-                        for (i, h) in hits.iter().enumerate() {
-                            let full = kb_root.join(&h.path);
-                            let body = fs::read_to_string(&full).unwrap_or_default();
-                            let trimmed: String = body.chars().take(3000).collect();
-                            block.push_str(&format!(
-                                "**[{}] {}** _(score={:.1}, source=`{}`)_\n\n{}\n\n",
-                                i + 1,
-                                h.title,
-                                h.score,
-                                h.path,
-                                trimmed
-                            ));
-                        }
-                    }
-                }
-                block.push_str("---\n\n");
-                sections.push(block);
+                ));
             }
         }
+    }
+    // 结构化 wiki + 双链地图 —— 与上面的行为指南解耦, 删了/留空 CLAUDE.md 也照样注入
+    let wiki_ctx = kb::kb_context_block();
+    if !wiki_ctx.is_empty() {
+        kb_block.push_str(&wiki_ctx);
+    }
+    if !kb_block.is_empty() {
+        kb_block.push_str("---\n\n");
+        sections.push(kb_block);
     }
 
     // ② 当前项目 CLAUDE.md 块
@@ -235,10 +223,11 @@ pub fn render_for_project(project_id: Option<&str>, user_prompt: &str) -> String
         return String::new();
     }
 
-    let mut out = String::from("\n\n## 主上下文 (CLAUDE.md + 知识库 一体注入)\n\n");
+    let mut out = String::from("\n\n## 主上下文 (CLAUDE.md + 维基库 一体注入)\n\n");
     out.push_str(
-        "以下内容由 Polaris 在发送前自动准备好, 请优先据此回答, \
-         无需再调 kb_search/任何工具来访问知识库:\n\n",
+        "以下是 Polaris 为你准备的行为指南与**结构化维基库**。知识库就在你的工作目录下, \
+         你可以用 Read/Glob/Grep 沿双链直接打开任意页面取证 —— 这就是本库「调用知识库」的方式, \
+         不需要 (也没有) kb_search 之类的召回工具:\n\n",
     );
     for s in &sections {
         out.push_str(s);

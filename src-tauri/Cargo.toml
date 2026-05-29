@@ -9,7 +9,7 @@ resolver = "2"
 
 [package]
 name = "polaris-app"
-version = "0.1.0"
+version = "0.2.10"
 description = "Polaris Lite - 本地优先 AI 工作台 (pi 内核轻量版)"
 authors = ["winner3388"]
 edition = "2021"
@@ -26,6 +26,9 @@ tauri = { version = "2.1", features = [] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"
 tauri-plugin-shell = "2.0"
+# 自动更新（GitHub Releases 托管）+ 重启（更新后自重启生效）
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

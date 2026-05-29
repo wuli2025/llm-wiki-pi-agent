@@ -9,6 +9,7 @@ import {
   type EnvStreamEvent,
   type ToolStatus,
 } from "../tauri";
+import McpConfigModal from "./McpConfigModal.vue";
 
 /**
  * 环境医生 — 新用户开箱的「环境监测 + 配置安装」。
@@ -39,9 +40,30 @@ const checkingUpdate = ref(false);
 
 const busy = computed(() => busyKind.value !== "");
 
+// 本次会话只自动装一次 shell, 避免失败时每次复检都反复弹 UAC
+let autoPwshTried = false;
+
 async function runCheck() {
   report.value = await envDoctor.check();
   return report.value;
+}
+
+/**
+ * claude 已装但缺可用 shell (真身 PowerShell 7 / Git Bash) → 自动装 PowerShell 7。
+ * 否则用户进去对话时 claude 会报「找不到 PowerShell / bash」。仅启动关 (gate) 自动触发,
+ * 每次会话最多一次。返回是否已发起安装 (true ⇒ 调用方应让出, 进入流式日志)。
+ */
+function maybeAutoInstallShell(r: EnvReport): boolean {
+  if (!props.gate || !isTauri) return false;
+  if (!r.pi.found || r.shellReady || autoPwshTried || busy.value) return false;
+  autoPwshTried = true;
+  phase.value = "panel";
+  installPwsh();
+  banner.value = {
+    kind: "info",
+    text: "检测到缺少 pi 可用的 Shell（PowerShell 7），正在自动为你安装——装好后即可正常对话，无需重启。",
+  };
+  return true;
 }
 
 onMounted(async () => {
@@ -64,6 +86,8 @@ onMounted(async () => {
     return;
   }
   if (r.ready) localStorage.setItem(READY_FLAG, "1");
+  // claude 在但缺 shell → 自动补装 PowerShell 7 (进入流式日志), 不再放任用户进去后对话报错
+  if (maybeAutoInstallShell(r)) return;
   phase.value = r.ready && props.gate ? "ready-skip" : "panel";
 });
 
@@ -103,6 +127,8 @@ async function finishInstall(ok: boolean, message: string) {
   // 装好 / 更新完后重新检测版本, 让「更新」按钮翻成「已是最新」
   updateInfo.value = null;
   if (r.pi.found) checkPiUpdate();
+  // 刚装完 pi 但还缺 shell → 链式自动补上 PowerShell 7 (仅 Windows 启动关)
+  maybeAutoInstallShell(r);
 }
 
 async function installPi() {
@@ -214,11 +240,16 @@ function statusText(t: ToolStatus): string {
   return t.required ? "未安装 · 必需" : "未安装 · 建议";
 }
 
-const tools = computed<ToolStatus[]>(() =>
-  report.value
-    ? [report.value.pi, report.value.pwsh, report.value.node, report.value.npm]
-    : []
-);
+// 当前系统 (后端 env_check 回传): "windows" | "macos" | "linux" | "browser"
+const osName = computed(() => report.value?.os ?? "");
+const isWin = computed(() => osName.value === "windows");
+
+const tools = computed<ToolStatus[]>(() => {
+  if (!report.value) return [];
+  const all = [report.value.pi, report.value.pwsh, report.value.node, report.value.npm];
+  // PowerShell 7 仅 Windows 上是 pi 的可用 shell; mac/Linux 自带 sh/zsh, 不展示该行。
+  return isWin.value ? all : all.filter((t) => t.key !== "pwsh");
+});
 const pathNeedsFix = computed(
   () =>
     !!report.value &&
@@ -273,14 +304,24 @@ const npmReady = computed(() => !!report.value?.npm.found);
                 >
                   {{ busyKind === "pi" || busyKind === "pi-npm" ? "安装中…" : "一键安装" }}
                 </button>
+                <!-- Windows 无 npm: 先引导装 Node.js (winget) -->
                 <button
-                  v-else
+                  v-else-if="isWin"
                   class="btn primary"
                   :disabled="busy"
                   title="npm 安装方式需要 Node.js，先装 Node 再装 pi"
                   @click="installNode"
                 >
                   {{ busyKind === "node" ? "安装中…" : "先装 Node.js" }}
+                </button>
+                <!-- mac/Linux 无 npm: pi 依赖 npm, 引导先装 Node.js (如 brew install node) -->
+                <button
+                  v-else
+                  class="btn primary"
+                  :disabled="true"
+                  title="pi 经 npm 安装，请先用系统包管理器装 Node.js（如 brew install node）后再回来一键安装"
+                >
+                  需先装 Node.js
                 </button>
               </template>
               <!-- 已装 pi: 检查 / 一键更新 -->
@@ -310,7 +351,7 @@ const npmReady = computed(() => !!report.value?.npm.found);
                   }}
                 </button>
               </template>
-              <template v-else-if="t.key === 'node' && !t.found">
+              <template v-else-if="t.key === 'node' && !t.found && isWin">
                 <button class="btn" :disabled="busy" @click="installNode">
                   {{ busyKind === "node" ? "安装中…" : "安装" }}
                 </button>
@@ -327,7 +368,7 @@ const npmReady = computed(() => !!report.value?.npm.found);
         <!-- 安装 pi 的方式说明 -->
         <p v-if="report && !report.pi.found" class="alt">
           通过 npm 全局安装 <code>npm i -g @earendil-works/pi-coding-agent</code>（需 Node ≥ 22.19）。
-          <span v-if="!npmReady">需先安装 <strong>Node.js</strong>（npm 随它一起来）。</span>
+          <span v-if="!npmReady">需先安装 <strong>Node.js</strong>（npm 随它一起来{{ isWin ? "" : "，如 brew install node" }}）。</span>
         </p>
 
         <!-- 环境变量 (PATH) 体检 -->
@@ -367,6 +408,12 @@ const npmReady = computed(() => !!report.value?.npm.found);
               {{ report?.ready ? "环境就绪 · 进入北极星" : "仍要进入" }}
             </button>
           </template>
+        </div>
+
+        <!-- MCP 服务配置 -->
+        <div v-if="!props.gate" class="mcp-section"
+        >
+          <McpConfigModal inline @close="() => {}" />
         </div>
       </template>
     </div>
@@ -655,5 +702,11 @@ const npmReady = computed(() => !!report.value?.npm.found);
   padding: 0;
 }
 .link:hover:not(:disabled) { text-decoration: underline; }
+
+.mcp-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-soft);
+}
 .link:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

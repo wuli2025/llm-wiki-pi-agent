@@ -27,6 +27,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        // 自动更新（前端在启动时检查 GitHub Releases）+ 重启
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let h = app.handle();
             kb::init(h).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
@@ -70,6 +73,7 @@ pub fn run() {
             conv::conv_list_projects,
             conv::conv_create_project,
             conv::conv_archive_project,
+            conv::conv_open_project_dir,
             conv::conv_list_conversations,
             conv::conv_create_conversation,
             conv::conv_delete_conversation,

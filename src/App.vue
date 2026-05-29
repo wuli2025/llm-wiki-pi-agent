@@ -6,27 +6,35 @@ import RightDrawer from "./components/RightDrawer.vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import WikiBrowse from "./components/WikiBrowse.vue";
 import KnowledgeGraph from "./components/KnowledgeGraph.vue";
+import Automation from "./components/Automation.vue";
+import AutomationModal from "./components/AutomationModal.vue";
 import SandboxStatus from "./features/sandbox/components/SandboxStatus.vue";
 import ClaudeMdPanel from "./components/ClaudeMdPanel.vue";
 import Settings from "./components/Settings.vue";
 import SkillCenter from "./components/SkillCenter.vue";
 import AddProviderModal from "./components/AddProviderModal.vue";
+import McpConfigModal from "./components/McpConfigModal.vue";
 import WorkflowPackModal from "./components/WorkflowPackModal.vue";
 import UsageBoard from "./components/UsageBoard.vue";
 import SplashScreen from "./components/SplashScreen.vue";
 import Onboarding from "./components/Onboarding.vue";
 import EnvDoctor from "./components/EnvDoctor.vue";
+import UpdatePanel from "./components/UpdatePanel.vue";
+import UpdateBanner from "./components/UpdateBanner.vue";
+import { checkForUpdate } from "./composables/useUpdater";
 import { useAppStore, type ViewKey } from "./stores/app";
 import { useArtifactsStore } from "./stores/artifacts";
 import { useProvidersStore } from "./stores/providers";
 import { useChatStore } from "./stores/chat";
 import { useWorkflowsStore } from "./stores/workflows";
+import { useAutomationStore } from "./stores/automation";
 
 const app = useAppStore();
 const artifacts = useArtifactsStore();
 const providers = useProvidersStore();
 const chatStore = useChatStore();
 const workflows = useWorkflowsStore();
+const automation = useAutomationStore();
 
 // ─────────── 重视图切换的"点击即缓冲"加载条 ───────────
 // 点击图谱/沙箱(且首次=未被 KeepAlive 暖过)时：先立刻亮加载条(此刻重组件尚未挂载，
@@ -69,6 +77,8 @@ function onViewReady(v: ViewKey) {
 // 这样切走/未挂载 ChatPanel 时后台任务仍持续流式推进、完成有提醒。
 onMounted(() => {
   chatStore.init();
+  // 启动后静默检查 GitHub Releases 是否有新版本（无网/未发布会被静默吞掉）
+  checkForUpdate();
 });
 
 // 启动流程：splash(每次) → onboarding(仅首次) → env(环境检测,健康则无感放行) → ready
@@ -109,6 +119,7 @@ const layoutCols = computed(
       <KeepAlive :include="['KnowledgeGraph', 'SandboxStatus']">
         <ChatPanel v-if="mountedView === 'chat'" />
         <WikiBrowse v-else-if="mountedView === 'wiki'" />
+        <Automation v-else-if="mountedView === 'automation'" />
         <KnowledgeGraph
           v-else-if="mountedView === 'graph'"
           @ready="onViewReady('graph')"
@@ -120,6 +131,8 @@ const layoutCols = computed(
         <ClaudeMdPanel v-else-if="mountedView === 'claude_md'" />
         <SkillCenter v-else-if="mountedView === 'skill_center'" />
         <EnvDoctor v-else-if="mountedView === 'env_doctor'" />
+        <UpdatePanel v-else-if="mountedView === 'update'" />
+        <McpConfigModal v-else-if="mountedView === 'mcp'" inline @close="app.setView('chat')" />
         <Settings v-else-if="mountedView === 'settings'" />
       </KeepAlive>
 
@@ -134,9 +147,16 @@ const layoutCols = computed(
     </main>
     <RightDrawer />
 
+    <!-- 自动更新提示条（发现新版本时浮出） -->
+    <UpdateBanner />
+
     <AddProviderModal v-if="providers.showAddModal" />
     <WorkflowPackModal v-if="workflows.editorOpen" />
+    <AutomationModal v-if="automation.editorOpen" />
     <UsageBoard v-if="providers.showUsageBoard" />
+
+    <!-- MCP 配置对话框（触发器已移到 Sidebar 导航栏下方） -->
+    <McpConfigModal v-if="app.showMcpModal" @close="app.showMcpModal = false" />
 
     <!-- 启动流程覆盖层：splash → onboarding -->
     <Transition name="splash-fade">

@@ -177,6 +177,17 @@ const renderTurns = computed<Turn[]>(() => {
 function isPending(t: Turn): boolean {
   return sending.value && t === renderTurns.value[renderTurns.value.length - 1];
 }
+
+// 复制某一回合的回答正文（回答下方的「复制」按钮）
+async function copyTurn(t: Turn) {
+  if (!t.text) return;
+  try {
+    await navigator.clipboard.writeText(t.text);
+    flashCopied("已复制回答");
+  } catch {
+    flashCopied("复制失败");
+  }
+}
 const showPermDropdown = ref(false);
 const permMode = ref<PermissionMode>("manual");
 const showSkillPanel = ref(false);
@@ -189,6 +200,17 @@ const scrollEl = ref<HTMLDivElement | null>(null);
 // 不中途收尾、不反问。开关随会话持续生效（贴近 session-scoped /goal），手动关闭。
 const goalMode = ref(false);
 const inputEl = ref<HTMLTextAreaElement | null>(null);
+
+// 输入框高度随内容自动增长（仿豆包）：先归零再按 scrollHeight 撑高，到 CSS max-height 后内部滚动。
+function autoGrow() {
+  const el = inputEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+// 内容变化（手输 / 程序填入 / 发送清空）都重算高度
+watch(input, () => nextTick(autoGrow));
+onMounted(() => nextTick(autoGrow));
 
 function toggleGoal() {
   goalMode.value = !goalMode.value;
@@ -754,6 +776,17 @@ async function deleteCurrentConv() {
               </button>
             </div>
           </div>
+
+          <!-- 回答下方操作：复制 -->
+          <div
+            v-if="t.hasAssistant && t.text && !isPending(t)"
+            class="turn-actions"
+          >
+            <button class="ta-btn" title="复制回答" @click="copyTurn(t)">
+              <Copy :size="13" :stroke-width="1.8" />
+              <span>复制</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -851,8 +884,9 @@ async function deleteCurrentConv() {
               ? '目标模式：在此写下完成条件，pi 会持续推进直到达成 (Enter 发送) …'
               : '请输入消息 (Enter 发送 · Shift + Enter 换行，可拖文件进来作为附件) …'
           "
-          rows="3"
+          rows="2"
           @keydown="onKeydown"
+          @input="autoGrow"
         ></textarea>
         <div class="toolbar">
           <div class="toolbar-left">
@@ -996,13 +1030,14 @@ async function deleteCurrentConv() {
 }
 .chat-top {
   position: relative;
-  padding: 12px 24px;
+  padding: 16px 30px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--border-soft);
-  /* 与左右边栏同色，连成一圈外框，不再是突出的深色条 */
-  background: var(--bg-soft);
+  /* 顶栏与下方回答区无缝连成一片：透明背景、无分隔线，不再是单独的异色条；
+     比原来略高更有呼吸感（仿豆包 / Coda） */
+  border-bottom: none;
+  background: transparent;
 }
 .chat-title {
   flex: 1;
@@ -1021,18 +1056,145 @@ async function deleteCurrentConv() {
   font-weight: 400;
   color: var(--muted);
 }
-.new-chat-btn {
-  padding: 5px 12px;
+/* 文件抽屉开关（移到顶栏右侧；收起后右侧整列消失，靠它再展开） */
+.drawer-toggle {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.drawer-toggle:hover {
+  background: var(--selection-bg);
+  color: var(--text);
+}
+
+/* 已置顶标记（标题前的小别针） */
+.t-pin {
+  color: var(--gold);
+  transform: rotate(35deg);
+  flex-shrink: 0;
+}
+
+/* 标题就地重命名输入框 */
+.t-rename {
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 3px 8px;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  background: var(--panel);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* ── 对话「更多」菜单 ── */
+.conv-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.conv-more {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.conv-more:hover,
+.conv-more.active {
+  background: var(--selection-bg);
+  color: var(--text);
+}
+.conv-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 184px;
+  padding: 5px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-2);
-  cursor: pointer;
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: cm-pop 130ms ease;
 }
-.new-chat-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+@keyframes cm-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.cm-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  border-radius: 6px;
+  text-align: left;
+}
+.cm-item:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+.cm-item.danger {
+  color: var(--vermilion);
+}
+.cm-item.danger:hover {
+  background: var(--vermilion-soft);
+}
+.cm-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--border-soft);
+}
+
+/* 复制反馈小提示 */
+.copy-toast {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--ink);
+  color: #fafaf7;
+  font-size: 12px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+.copy-fade-enter-active,
+.copy-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.copy-fade-enter-from,
+.copy-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -4px);
 }
 
 /* 已置顶标记（标题前的小别针） */
@@ -1180,20 +1342,33 @@ async function deleteCurrentConv() {
   font-size: 13px;
   letter-spacing: 0.5px;
 }
-.hero-tips {
-  margin-top: 28px;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 2;
-  text-align: left;
-  display: inline-block;
+/* ── 毛主席项目彩蛋空状态 ── */
+.mao-hero {
+  font-family: var(--serif);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 6px;
+  color: var(--vermilion);
 }
-.hero-tips code {
-  background: var(--bg-soft);
-  padding: 1px 5px;
-  border-radius: 2px;
-  font-family: var(--mono);
-  font-size: 11px;
+.mao-desc {
+  margin: 26px auto 0;
+  max-width: 560px;
+  font-size: 13.5px;
+  line-height: 2;
+  color: var(--text-2);
+  text-align: center;
+}
+.mao-desc strong {
+  color: var(--vermilion);
+  font-weight: 600;
+}
+.mao-slogan {
+  margin-top: 34px;
+  font-family: var(--serif);
+  font-size: 16px;
+  letter-spacing: 3px;
+  color: var(--vermilion);
+  font-weight: 600;
 }
 
 /* ── 毛主席项目彩蛋空状态 ── */
@@ -1344,6 +1519,35 @@ async function deleteCurrentConv() {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 回答下方操作行（复制） —— 平时淡出，悬停回答时浮现 */
+.turn-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg.ai:hover .turn-actions {
+  opacity: 1;
+}
+.ta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-soft);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+  border-radius: 7px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.ta-btn:hover {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--bg-soft);
 }
 
 /* ── markdown 正文排版 ── */
@@ -1655,26 +1859,30 @@ async function deleteCurrentConv() {
   background: var(--primary-soft);
 }
 
-/* 输入卡片 */
+/* 输入卡片 —— 仿豆包：明显更宽（约原来的 1.7 倍），输入多了高度自动撑大 */
 .input-card {
   width: 100%;
-  max-width: 820px;
+  max-width: 1394px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   box-shadow: var(--shadow);
-  padding: 12px 14px;
+  padding: 14px 18px;
 }
 textarea {
   width: 100%;
   border: none;
   outline: none;
   resize: none;
-  font-size: 13.5px;
+  font-size: 14.5px;
   background: transparent;
   color: var(--text);
-  padding: 4px 0;
-  line-height: 1.7;
+  padding: 4px 2px;
+  line-height: 1.75;
+  /* 高度随内容自动增长（JS 控制），最多到上限后内部滚动 */
+  min-height: 60px;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 /* 工具栏 */
@@ -1817,7 +2025,7 @@ textarea {
 /* ─────────── 底部授权栏 ─────────── */
 .auth-bar {
   width: 100%;
-  max-width: 820px;
+  max-width: 1394px;
   display: flex;
   justify-content: flex-end;
 }

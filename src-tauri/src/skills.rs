@@ -98,8 +98,8 @@ fn catalog() -> Vec<CatalogSkill> {
         },
         CatalogSkill {
             id: "image-gen",
-            name: "AI 生图 gpt-image-2",
-            description: "用 OpenAI gpt-image-2 模型按描述生成图片，自动扩写提示词，支持多候选与改图",
+            name: "AI 生图",
+            description: "按描述生成图片：先检测当前供应商是否真的支持生图，不支持时用中文说明并改用「很有图片质感的 HTML」兜底",
             source: "third-party",
             preinstalled: false,
             system_prompt: include_str!("templates/skills/image-gen.md"),
@@ -375,8 +375,42 @@ pub fn detect_browser_intent(prompt: &str) -> bool {
     triggers.iter().any(|t| lower.contains(t))
 }
 
+/// 检测是否是「做 PPT / 演示文稿」的任务。命中即自动激活 pptx 技能，
+/// 不再要求用户先去技能中心安装 / 在对话框点选 —— 这是「无法产出 PPT」的首要原因。
+pub fn detect_pptx_intent(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    let triggers = [
+        // 英文
+        "ppt", "pptx", "powerpoint", "slide deck", "slides", "keynote", "presentation",
+        // 中文
+        "幻灯片", "演示文稿", "演示文档", "做个演示", "做一个演示", "做份演示",
+        "汇报材料", "路演", "宣讲", "述职", "答辩",
+    ];
+    triggers.iter().any(|t| lower.contains(t))
+}
+
+/// 检测是否是「生成图片 / 文生图 / AI 绘画」的任务（仅针对写实照片、AI 绘画类**位图**，
+/// 不含图表 / 流程图 / SVG —— 那些可由代码生成，不受供应商生图能力限制）。
+/// 命中即自动激活 image-gen 技能，让它先把「当前供应商能不能真的生图」讲清楚。
+pub fn detect_image_intent(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    let triggers = [
+        // 英文
+        "generate an image", "generate image", "create an image", "make an image",
+        "draw me", "text-to-image", "an illustration", "a poster", "ai art",
+        // 中文 · 动词类
+        "生图", "生成图片", "生成图像", "生成一张图", "生成一幅", "文生图", "ai 作图",
+        "ai作图", "ai 画", "ai画", "画一张", "画一幅", "画个", "画张", "画幅",
+        "帮我画", "给我画", "做张图", "做一张图", "做个图", "来张图", "出张图",
+        // 中文 · 名词类（强烈暗示位图绘制）
+        "配图", "海报", "插画", "插图", "封面图", "宣传图", "壁纸", "头像图",
+    ];
+    triggers.iter().any(|t| lower.contains(t))
+}
+
 /// 按任务意图自动激活的 skill（不依赖用户在对话框点选）。可返回多个。
-/// 创建技能意图 → skill-creator；网页/浏览器自动化意图 → cloak-browser。
+/// 创建技能意图 → skill-creator；网页/浏览器自动化 → cloak-browser；
+/// 做 PPT → pptx；生成图片 → image-gen。
 pub fn auto_skills_for_intent(prompt: &str) -> Vec<(SkillMeta, String)> {
     let mut out = Vec::new();
     if detect_skill_creation_intent(prompt) {
@@ -386,6 +420,16 @@ pub fn auto_skills_for_intent(prompt: &str) -> Vec<(SkillMeta, String)> {
     }
     if detect_browser_intent(prompt) {
         if let Some(s) = find("cloak-browser") {
+            out.push(s);
+        }
+    }
+    if detect_pptx_intent(prompt) {
+        if let Some(s) = find("pptx") {
+            out.push(s);
+        }
+    }
+    if detect_image_intent(prompt) {
+        if let Some(s) = find("image-gen") {
             out.push(s);
         }
     }

@@ -337,6 +337,8 @@ export const convApi = {
     p(await invoke<RawProject>("conv_create_project", { name })),
   archiveProject: (projectId: string) =>
     invoke<void>("conv_archive_project", { projectId }),
+  openProjectDir: (projectId: string) =>
+    invoke<void>("conv_open_project_dir", { projectId }),
   listConversations: async (projectId: string) =>
     (await invoke<RawConv[]>("conv_list_conversations", { projectId })).map(c),
   createConversation: async (projectId: string) =>
@@ -448,6 +450,8 @@ export interface EnvReport {
   npm: ToolStatus;
   piDir: string | null;
   piDirOnUserPath: boolean;
+  /** 是否有 pi 可用的 shell (Windows: PowerShell 7 / Git Bash; mac/Linux: sh/zsh 恒有)；false ⇒ 对话会报缺 shell */
+  shellReady: boolean;
   ready: boolean;
 }
 export interface PathFixResult {
@@ -632,6 +636,7 @@ function browserStub(cmd: string, _args?: Record<string, unknown>): unknown {
     case "conv_get_messages":
       return [];
     case "conv_archive_project":
+    case "conv_open_project_dir":
     case "conv_delete_conversation":
     case "conv_rename_conversation":
       return undefined;
@@ -698,6 +703,7 @@ function browserStub(cmd: string, _args?: Record<string, unknown>): unknown {
         npm: tool("npm", "npm", true),
         piDir: null,
         piDirOnUserPath: true,
+        shellReady: false,
         ready: false,
       };
     }

@@ -424,10 +424,9 @@ function fmtSize(n: number): string {
   flex-direction: column;
   overflow: hidden;
 }
+/* 收起：整列不渲染 —— 右侧边彻底消失，不留任何导轨/小框 */
 .dr.collapsed {
-  padding: 8px 4px;
-  align-items: center;
-  gap: 8px;
+  display: none;
 }
 
 /* ───────── 预览头 ───────── */
@@ -944,25 +943,148 @@ function fmtSize(n: number): string {
 .rail-tabs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
 }
-.rail-tab {
-  width: 32px;
-  height: 32px;
+.wf-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 10px 10px 0;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+}
+.wf-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+.wf-card:hover .wf-use {
+  opacity: 1;
+}
+.wf-bar {
+  flex-shrink: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+}
+.wf-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 2px;
+}
+.wf-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wf-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.wf-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  flex-shrink: 0;
+}
+.wf-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--primary);
+  border-radius: 7px;
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  font-size: 11.5px;
+  font-weight: 500;
+  opacity: 0.85;
+  transition: opacity 0.15s, background 0.15s;
+}
+.wf-use:hover {
+  background: var(--primary);
+  color: #fff;
+}
+.wf-menu-wrap {
+  position: relative;
+}
+.wf-dots {
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 4px;
   background: transparent;
   color: var(--muted);
-  font-family: var(--serif);
-  font-size: 13px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.rail-tab:hover {
+.wf-dots:hover {
   background: var(--selection-bg);
   color: var(--text);
 }
-.rail-tab.active {
-  background: var(--selection-bg);
-  color: var(--ink);
+.wf-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 116px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-lg);
+  animation: wf-pop 130ms ease;
 }
+@keyframes wf-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.wf-mi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  border-radius: 6px;
+  text-align: left;
+}
+.wf-mi:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+.wf-mi.danger {
+  color: var(--vermilion);
+}
+.wf-mi.danger:hover {
+  background: var(--vermilion-soft);
+}
+
 </style>

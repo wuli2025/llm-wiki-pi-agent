@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────
+# 发版 + 自动更新产物发布（跨平台：Windows + macOS）
+# 打一个 v* 标签（如 v0.2.10）推上来，会在 Windows 与 macOS 两个 runner 上并行
+# 构建、用更新私钥签名，并把各自的安装包 + .sig + latest.json 上传到同一个 GitHub Release。
+#   · Windows → NSIS 安装包（.exe）
+#   · macOS   → universal（Intel + Apple Silicon 通用）.dmg / .app
+# tauri-action 会把两端的平台条目合并进同一份 latest.json，应用端据此自动升级。
+# 仓库本身用 github 上下文 + GITHUB_TOKEN，无需写死仓库地址（push 到哪个仓库就发到哪个）。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配置：
+#   TAURI_SIGNING_PRIVATE_KEY           = 更新私钥文件全文（D:\polaris\polaris-updater-private.key 内容，单行无换行）
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = 更新私钥密码（本密钥无密码则留空）
+#   POLARIS_GIFT_MINIMAX_KEY            = 「粉丝福利」MiniMax key（构建期注入，build.rs 混淆进二进制）
+#
+# 关于 macOS 签名/公证（可选，未配则产未签名包）：
+#   未签名 .dmg 用户首次打开会被 Gatekeeper 拦，需右键→打开，或
+#   `xattr -dr com.apple.quarantine /Applications/Polaris\ Lite.app`。
+#   若要消除提示并让 mac 自动更新稳定生效，再补这些 secret 并在 tauri.conf 配 signingIdentity：
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY /
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID（这里默认不强制，留空即跳过签名）。
+# ─────────────────────────────────────────────────────────────
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows：只出 NSIS 安装包（保持与原有产物一致）
+          - platform: windows-latest
+            args: "--bundles nsis"
+            rust_targets: ""
+          # macOS：universal 通用二进制（一个包同时覆盖 Intel 与 Apple Silicon）
+          - platform: macos-latest
+            args: "--target universal-apple-darwin --bundles app,dmg"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm install
+
+      - name: Build, sign & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # 「粉丝福利」MiniMax key：构建期注入，build.rs XOR 混淆进二进制，公开源码里无明文。
+          POLARIS_GIFT_MINIMAX_KEY: ${{ secrets.POLARIS_GIFT_MINIMAX_KEY }}
+          # macOS 签名/公证（未配置则为空，tauri-action 自动跳过签名，产未签名包）。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Polaris Lite ${{ github.ref_name }}"
+          releaseBody: "查看 CHANGELOG 或提交记录了解本次更新内容。"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
