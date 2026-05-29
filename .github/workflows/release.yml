@@ -71,13 +71,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # 「粉丝福利」MiniMax key：构建期注入，build.rs XOR 混淆进二进制，公开源码里无明文。
           POLARIS_GIFT_MINIMAX_KEY: ${{ secrets.POLARIS_GIFT_MINIMAX_KEY }}
-          # macOS 签名/公证（未配置则为空，tauri-action 自动跳过签名，产未签名包）。
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS 签名/公证：故意【不传】APPLE_* env —— 一旦传入(哪怕空串)tauri 会尝试
+          # `security import` 导入证书并失败。不传 → 产【未签名/ad-hoc】.dmg/.app(可正常分发，
+          # 用户首启 Gatekeeper 右键打开或 `xattr -dr com.apple.quarantine` 放行，见 docs/macos.md)。
+          # 将来要正式签名/公证：在仓库配 APPLE_CERTIFICATE 等 secret，并把它们加回此 env 块。
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Polaris Lite ${{ github.ref_name }}"
